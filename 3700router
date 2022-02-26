@@ -7,6 +7,8 @@ class Router:
     relations = {}
     sockets = {}
     ports = {}
+    forwarding = {}
+    route_cache = []
 
     def __init__(self, asn, connections):
         print("Router at AS %s starting up" % asn)
@@ -28,6 +30,62 @@ class Router:
     def send(self, network, message):
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
 
+    def send_update_message(self, srcif, deserialized_update_msg):
+        update_msg = {'msg': {}, 'type': 'update'}
+        update_msg['msg']['netmask'] = deserialized_update_msg['netmask']
+        update_msg['msg']['ASPath'] = [self.asn] + deserialized_update_msg['ASPath']
+        update_msg['msg']['network'] = deserialized_update_msg['network']
+        for network in self.sockets.keys():
+            if network == srcif:
+                continue
+            update_msg['src'] = self.our_addr(network)
+            update_msg['dst'] = network
+            self.send(network, json.dumps(update_msg))
+
+    def add_to_route_cache(self, next_hop, deserialized_update_msg):
+        deserialized_update_msg['peer'] = next_hop
+        self.route_cache.append(deserialized_update_msg)
+
+    # Given destination ip, find best entry in our route cache table
+    # TODO: Put in extra logic for breaking ties and stuff
+    def find_best_match(self, dst_if):
+        subnet_mask = 0
+        for entry in self.route_cache:
+            msk_int = [int(x) for x in entry['netmask'].split(".")]
+            dst_int = [int(x) for x in dst_if.split(".")]
+            ntwrk_int = [int(x) for x in entry['network'].split(".")]
+            match = True
+            for i in range(len(msk_int)):
+                if ntwrk_int[i] != (msk_int[i] & dst_int[i]):
+                    match = False
+            # TODO: remove early return once we have overlapping routes
+            if match:
+                return entry['peer']
+        return ""       
+
+
+    def send_data_message(self, deserialized_data_msg, srcif):
+        ip_to_send_to = self.find_best_match(deserialized_data_msg['dst'])
+        if ip_to_send_to:
+            self.send(ip_to_send_to, json.dumps(deserialized_data_msg))
+        else:
+            no_route_msg = {'src': self.our_addr(srcif),
+                            'dst': deserialized_data_msg['src'],
+                            'type': 'no route',
+                            'msg': {}}
+            self.send(srcif, json.dumps(no_route_msg))
+            # send message saying theres no match
+
+
+    def send_dump_message(self, src, dst):
+        self.send(dst,
+                  json.dumps({'src': src,
+                              'dst': dst,
+                              'type': 'table', 
+                              'msg': self.route_cache}))
+
+
+
     def run(self):
         while True:
             socks = select.select(self.sockets.values(), [], [], 0.1)[0]
@@ -41,6 +99,17 @@ class Router:
                 msg = k.decode('utf-8')
 
                 print("Received message '%s' from %s" % (msg, srcif))
+                msg_json = json.loads(msg)
+                type = msg_json['type']
+                if type == 'update':
+                    self.add_to_route_cache(srcif, msg_json['msg'])
+                    self.send_update_message(srcif, msg_json['msg'])
+                elif type == 'data':
+                    self.send_data_message(msg_json, srcif)
+                elif type == 'dump':
+                    self.send_dump_message(msg_json['dst'], msg_json['src'])
+                
+
         return
 
 if __name__ == "__main__":
