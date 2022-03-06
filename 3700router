@@ -174,9 +174,25 @@ class Router:
 
 
     def remove_from_forwarding_table(self, srcif, networks):
+        rebuild_and_retry = False
         for network_entry in networks:
             network, netmask = network_entry['network'], network_entry['netmask']
+            before_len = len(self.forwarding_table)
             self.forwarding_table = list(filter(lambda entry: (not (entry['network'] == network and entry['netmask'] == netmask and entry['peer'] == srcif)), self.forwarding_table))
+            if before_len == len(self.forwarding_table):
+                rebuild_and_retry = True
+                break
+
+        if rebuild_and_retry:
+            self.forwarding_table.clear()
+            for entry in self.update_cache:
+                self.add_to_forwarding_table(entry['src'], entry['msg'])
+            for entry in self.withdrawal_cache:
+                self.remove_from_forwarding_table(entry['src'], entry['msg'])
+            self.aggregate()
+
+
+
 
     # input: array of strings representing binary (ex: ['1111', '1110'])
     # output: tuple representing index of last 1 (ex: (1, 2))
