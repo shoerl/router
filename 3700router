@@ -56,7 +56,7 @@ def flip_last_one(to_search, to_flip):
 # Input: Two dictionarys, and a list of strings/keys
 # Output: Boolean (True/False), representing whether all of those properties are same in these two dictionarys
 def dict_all_properties_same(entry1, entry2, keys):
-    return all(list(map(lambda key: entry1[key] == entry2[key]), keys))
+    return all(list(map(lambda key: entry1[key] == entry2[key], keys)))
 
 class Router:
 
