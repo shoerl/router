@@ -3,30 +3,52 @@
 import argparse, socket, time, json, select, struct, sys, math
 
 
-# Input: String (st)
-# Output: Array of ints
-# Split string by period and turn each portion into int,
-# then return that int array
-def split_by_period_and_get_int_array(st):
-    return [int(x) for x in st.split(".")]
+def split_by_period_and_get_int_array(addr):
+    """
+    Split string by period and turn each portion into int, then return that int array
+    Args:
+        addr - string represnting address/mask (example: '255.255.255.0')
+    Returns:
+        array of ints - representing each int in mask (example: [255, 255, 255, 0])
+    """
+    return [int(x) for x in addr.split(".")]
 
-# Input: String (st) representing a address/mask. Example: '255.255.255.0'
-# Output: Count of non-zero bits
-# Return count of non-zero bits in the binary representation of our address/mask
 def get_count_of_non_zero_bits(addr):
+    """
+    Return count of non-zero bits in the binary representation of our address/mask
+    Args:
+        addr - string representing address/mask (example: '255.255.255.0')
+    Returns:
+        int - representing count of non-zero (one) bits 
+    """
     count = 0
     int_array = split_by_period_and_get_int_array(addr)
     for num in int_array:
         count += bin(num).count("1")
     return count
 
-def split_by_period_and_get_bin_array(st):
-    arr = split_by_period_and_get_int_array(st)
+def split_by_period_and_get_bin_array(addr):
+    """
+    Split addr into int array and then convert each item in
+    array to binary representation of int (8 bits padded)
+    Args:
+        addr - string representing address/mask (example: '255.255.255.0')
+    Returns:
+        array of strings - representing 8 bit padded binary equivilant of each int 
+        (example: ['11111111', '11111111', '11111111', '00000000'])
+
+    """
+    arr = split_by_period_and_get_int_array(addr)
     return list(map(lambda x: '{:08b}'.format(x), arr))
 
-# input: array of strings representing binary (ex: ['1111', '1110'])
-# output: tuple representing index of last 1 (ex: (1, 2))
 def get_idx_of_last_one(bin_array):
+    """
+    Get index of last one bit in array of strings representing binary
+    Args:
+        bin_array - array of strings representing binary (ex: ['1111', '1110'])
+    Returns:
+        tuple - representing index of last 1 (ex: (1, 2))
+    """
     last_idx = (-1, -1)
     for idx, arr in enumerate(bin_array):
         for idx2, ch in enumerate(arr):
@@ -34,12 +56,18 @@ def get_idx_of_last_one(bin_array):
                 return last_idx
             else:
                 last_idx = (idx, idx2)
+    return last_idx
 
-# input:  to_search which is string representing address/mask to find last one in Example: '255.255.255.0'
-#         to_flip which is string representing adddress/mask to flip bit in position of last one in to_search
-# output: String representing to_flip address/mask with flipped bit
-# Example: to_search = '255.255.255.0', to_flip = '255.255.0.0', return '255.255.1.0'
 def flip_last_one(to_search, to_flip):
+    """
+    Find index of last one bit in to_search, and flip corresponding bit in to_search
+    Example: to_search = '255.255.255.0', to_flip = '255.255.0.0', return '255.255.1.0'
+    Args:
+        to_search - string representing address/mask to find last one in Example: '255.255.255.0'
+        to_flip - string representing address/mask to flip bit in position of last one in to_search
+    Returns:
+        string - representing to_flip address/mask with flipped bit
+    """
     to_search_bin = split_by_period_and_get_bin_array(to_search)
     to_flip_bin = split_by_period_and_get_bin_array(to_flip)
 
@@ -53,13 +81,20 @@ def flip_last_one(to_search, to_flip):
     return "%d.%d.%d.%d" % (to_flip_int[0], to_flip_int[1], to_flip_int[2], to_flip_int[3])
 
 
-# Input: Two dictionarys, and a list of strings/keys
-# Output: Boolean (True/False), representing whether all of those properties are same in these two dictionarys
 def dict_all_properties_same(entry1, entry2, keys):
+    """
+    Do these two dictionarys contain the same values for all of the keys given?
+    Args:
+        entry1 - dictionary
+        entry2 - dictionary
+        keys - list of strings representing keys in dictionarys
+    Returns:
+        boolean - representing whether these two dictionary entrys contain the same values for all of the keys given
+    """
     return all(list(map(lambda key: entry1[key] == entry2[key], keys)))
 
-class Router:
 
+class Router:
     relations = {}
     sockets = {}
     ports = {}
@@ -88,6 +123,13 @@ class Router:
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
 
     def send_update_messages(self, srcif, deserialized_update_msg):
+        """
+        Send update message to all networks we have in our router (except for one we recieved it from)
+        Args:
+            srcif - string representing network which we recieved update message from
+            deserialized_update_msg - dictionary representing inner msg in update message we recieved
+        """
+
         # if true, we must have gotten from peer or provider, so only send updates to customers
         only_customers = self.relations[srcif] != 'cust'
         update_msg = {'msg': {}, 'type': 'update'}
@@ -101,16 +143,23 @@ class Router:
             update_msg['dst'] = network
             self.send(network, json.dumps(update_msg))
 
-    def send_withdraw_message(self, srcif, withdraw_msg):
+    def send_withdraw_message(self, srcif, deserialized_withdraw_msg):
+        """
+        Send withdraw message to all networks we have in our router (except for one we recieved it from)
+        Args:
+            srcif - string representing network which we recieved withdrawal message from
+            deserialized_update_msg - dictionary representing inner msg in withdrawal message we recieved
+        """
+
         # if true, we must have gotten from peer or provider, so only send updates to customers
         only_customers = self.relations[srcif] != 'cust'
-        withdraw_msg = {'msg': withdraw_msg, 'type': 'withdraw'}
+        deserialized_withdraw_msg = {'msg': deserialized_withdraw_msg, 'type': 'withdraw'}
         for network in self.sockets.keys():
             if network == srcif or (only_customers and self.relations[network] != 'cust'):
                 continue
-            withdraw_msg['src'] = self.our_addr(network)
-            withdraw_msg['dst'] = network
-            self.send(network, json.dumps(withdraw_msg))
+            deserialized_withdraw_msg['src'] = self.our_addr(network)
+            deserialized_withdraw_msg['dst'] = network
+            self.send(network, json.dumps(deserialized_withdraw_msg))
 
 
     # full deserialized update msg being the full msg (with src, dest, etc..)
@@ -125,11 +174,17 @@ class Router:
         deserialized_update_msg['peer'] = next_hop
         self.forwarding_table.append(deserialized_update_msg)
 
-    # Inputs: entry1 and entry2 which are dictionarys representing forwarding table entries
-    # Output: dictionary representing best forwarding table entry
-    # This function has the constraint that entry2 will never be an empty dictionary, but entry1 may be
-    # We compare entries using the rules outlined in the project spec
     def compare_entries_and_get_best(self, entry1, entry2):
+        """
+        Compare forwarding table entries and return best, using rules outlined in project spec
+        This function has the constraint that entry2 will never be an empty dictionary, but entry1 may be
+        Args:
+            entry1 - dictionary representing forwarding table entry
+            entry2 - dictionary representing forwarding table entry
+        Returns:
+            dictionary - representing the best forwarding table entry
+        """
+
         if not entry1:
             return entry2
         # Netmask count here represents the number of 1's in the binary representation
@@ -158,7 +213,6 @@ class Router:
             return entry1
 
     # Given destination ip, find best entry in our route cache table
-    # TODO: Put in extra logic for breaking ties and stuff
     def find_best_match(self, dst_if):
         best_entry_so_far = {}
         for entry in self.forwarding_table:
@@ -259,6 +313,7 @@ class Router:
         if not entries:
             return
 
+        # Whatever network address is lower will be the new network in aggregated entry
         if entries[0]['network'] < entries[1]['network']:
             new_entry = entries[0].copy()
         else:
@@ -270,7 +325,6 @@ class Router:
         self.forwarding_table.remove(entries[1])
         self.forwarding_table.append(new_entry)
 
-                    
 
     def run(self):
         while True:
