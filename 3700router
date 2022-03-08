@@ -24,6 +24,40 @@ def split_by_period_and_get_bin_array(st):
     arr = split_by_period_and_get_int_array(st)
     return list(map(lambda x: '{:08b}'.format(x), arr))
 
+# input: array of strings representing binary (ex: ['1111', '1110'])
+# output: tuple representing index of last 1 (ex: (1, 2))
+def get_idx_of_last_one(bin_array):
+    last_idx = (-1, -1)
+    for idx, arr in enumerate(bin_array):
+        for idx2, ch in enumerate(arr):
+            if ch == '0':
+                return last_idx
+            else:
+                last_idx = (idx, idx2)
+
+# input:  to_search which is string representing address/mask to find last one in Example: '255.255.255.0'
+#         to_flip which is string representing adddress/mask to flip bit in position of last one in to_search
+# output: String representing to_flip address/mask with flipped bit
+# Example: to_search = '255.255.255.0', to_flip = '255.255.0.0', return '255.255.1.0'
+def flip_last_one(to_search, to_flip):
+    to_search_bin = split_by_period_and_get_bin_array(to_search)
+    to_flip_bin = split_by_period_and_get_bin_array(to_flip)
+
+    idx1, idx2 = get_idx_of_last_one(to_search_bin)
+    # Turn string into array of characters so we can modify it easily
+    to_flip_bin[idx1] = list(to_flip_bin[idx1])
+    to_flip_bin[idx1][idx2] = '1' if to_flip_bin[idx1][idx2] == '0' else '0'
+    to_flip_bin[idx1] = "".join(to_flip_bin[idx1])
+
+    to_flip_int = list(map(lambda x: int(x, 2), to_flip_bin))
+    return "%d.%d.%d.%d" % (to_flip_int[0], to_flip_int[1], to_flip_int[2], to_flip_int[3])
+
+
+# Input: Two dictionarys, and a list of strings/keys
+# Output: Boolean (True/False), representing whether all of those properties are same in these two dictionarys
+def dict_all_properties_same(entry1, entry2, keys):
+    return all(list(map(lambda key: entry1[key] == entry2[key]), keys))
+
 class Router:
 
     relations = {}
@@ -173,67 +207,55 @@ class Router:
                               'msg': self.forwarding_table}))
 
 
+    def rebuild_forwarding_table_from_scratch(self):
+        self.forwarding_table.clear()
+        for entry in self.update_cache:
+            self.add_to_forwarding_table(entry['src'], entry['msg'])
+        for entry in self.withdrawal_cache:
+            self.remove_from_forwarding_table(entry['src'], entry['msg'])
+        # loop aggregation incase we need to aggregate more than one entry
+        self.loop_aggregation()
+
+
     def remove_from_forwarding_table(self, srcif, networks):
         rebuild_and_retry = False
         for network_entry in networks:
-            network, netmask = network_entry['network'], network_entry['netmask']
             before_len = len(self.forwarding_table)
-            self.forwarding_table = list(filter(lambda entry: (not (entry['network'] == network and entry['netmask'] == netmask and entry['peer'] == srcif)), self.forwarding_table))
+            self.forwarding_table = list(filter(lambda entry: (not (dict_all_properties_same(entry, network_entry, ['network', 'netmask']) and entry['peer'] == srcif)), self.forwarding_table))
             if before_len == len(self.forwarding_table):
-                rebuild_and_retry = True
+                # We are going to have to rebuild everything, so break out of this loop/function after we are done
+                # as the forwarding table will be different + we will handle removing entries seperately there too
+                # so we don't want to remove anything twice
+                self.rebuild_forwarding_table_from_scratch()
                 break
 
-        if rebuild_and_retry:
-            self.forwarding_table.clear()
-            for entry in self.update_cache:
-                self.add_to_forwarding_table(entry['src'], entry['msg'])
-            for entry in self.withdrawal_cache:
-                self.remove_from_forwarding_table(entry['src'], entry['msg'])
-            self.aggregate()
-
-
-
-
-    # input: array of strings representing binary (ex: ['1111', '1110'])
-    # output: tuple representing index of last 1 (ex: (1, 2))
-    def get_idx_of_last_one(self, bin_array):
-        last_idx = (-1, -1)
-        for idx, arr in enumerate(bin_array):
-            for idx2, ch in enumerate(arr):
-                if ch == '0':
-                    return last_idx
-                else:
-                    last_idx = (idx, idx2)
-
     def get_neighboring_entry(self, network, netmask):
-        ntwk_bin = split_by_period_and_get_bin_array(network)
-        ntmsk_bin = split_by_period_and_get_bin_array(netmask)
-        
-        idx1, idx2 = self.get_idx_of_last_one(ntmsk_bin)
-        ntwk_bin[idx1] = list(ntwk_bin[idx1])
-        if ntwk_bin[idx1][idx2] == '0':
-            ntwk_bin[idx1][idx2] = '1'
-        else:
-            ntwk_bin[idx1][idx2] = '0'
-        ntwk_bin[idx1] = "".join(ntwk_bin[idx1])
-        
-        ntwk_int = list(map(lambda x: int(x, 2), ntwk_bin))
-        return "%d.%d.%d.%d" % (ntwk_int[0], ntwk_int[1], ntwk_int[2], ntwk_int[3])
+        return flip_last_one(netmask, network)
 
-    def get_entries_to_aggregate(self):
+    # Input: N/A (except self)
+    # Output: Pair of entries we can aggregate, empty array if there are no entries to aggregate
+    def get_entry_pair_to_aggregate(self):
         for entry in self.forwarding_table:
-            neighbor = self.get_neighboring_entry(entry['network'], entry['netmask'])
+            neighbor_ntwk = self.get_neighboring_entry(entry['network'], entry['netmask'])
             for entry2 in self.forwarding_table:
                 if entry == entry2:
                     continue
-                if not (entry['localpref'] == entry2['localpref'] and entry['ASPath'] == entry2['ASPath'] and entry['origin'] == entry2['origin'] and entry['selfOrigin'] == entry2['selfOrigin'] and entry['peer'] == entry2['peer']):
+                if not dict_all_properties_same(entry, entry2, ['localpref', 'ASPath', 'origin', 'selfOrigin', 'peer']):
                     continue
-                if neighbor == entry2['network'] and entry['netmask'] == entry2['netmask']:
+                if neighbor_ntwk == entry2['network'] and entry['netmask'] == entry2['netmask']:
                     return [entry, entry2]
         return []
 
+    # Helper function for handling rebuilding table, keep aggregating until aggregating
+    # produces table of same size
+    def loop_aggregation(self):
+        old_len = len(self.forwarding_table)
+        self.aggregate()
+        if len(self.forwarding_table) != old_len:
+            self.loop_aggregation()
+
     def aggregate(self):
-        entries = self.get_entries_to_aggregate()
+        entries = self.get_entry_pair_to_aggregate()
         if not entries:
             return
 
@@ -241,14 +263,9 @@ class Router:
             new_entry = entries[0].copy()
         else:
             new_entry = entries[1].copy()
-        
-        ntmsk_bin = split_by_period_and_get_bin_array(new_entry['netmask'])
-        idx1, idx2 = self.get_idx_of_last_one(ntmsk_bin)
-        ntmsk_bin[idx1] = list(ntmsk_bin[idx1])
-        ntmsk_bin[idx1][idx2] = '0'
-        ntmsk_bin[idx1] = "".join(ntmsk_bin[idx1])
-        ntmsk_int = list(map(lambda x: int(x, 2), ntmsk_bin))
-        new_entry['netmask'] = "%d.%d.%d.%d" % (ntmsk_int[0], ntmsk_int[1], ntmsk_int[2], ntmsk_int[3])
+
+        new_entry['netmask'] = flip_last_one(new_entry['netmask'], new_entry['netmask'])
+
         self.forwarding_table.remove(entries[0])
         self.forwarding_table.remove(entries[1])
         self.forwarding_table.append(new_entry)
