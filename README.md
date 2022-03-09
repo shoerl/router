@@ -7,10 +7,19 @@ Group Members: Sean Hoerl & Jess Van de Ven
 Use a forwarding table to track the destination networks/ports (while also storing all of the correspoding info like netmask, ASPath, etc...). Store all update and withdrawal messages recieved for later use when rebuilding. Entries on this forwarding table were aggregated when consecutive binary representation network/netmask entries had the same dest port. 
 
 We handled incoming message of different types in the following ways:
-    Update: add message to our update cache, update the forwarding table, forward the update to all other addresses in our forwarding table (except one we recived it from), attempt to aggregate the forwarding table
-    Data: find the best match in our forwarding table for the destination address, send message to that address
-    Dump: send copy of our forwarding table to destination address
-    Withdraw: add mesage to our withdrawal cache, update the forwarding table (disaggregate if needed), forward the withdraw
+* Update:
+    *  add message to our update cache 
+    *  update the forwarding table,
+    *  forward the update to all other addresses in our forwarding table (except one we recived it from), attempt to aggregate the forwarding table
+* Data: 
+    * find the best match in our forwarding table for the destination address
+    * send message to that address
+* Dump: 
+    * send copy of our forwarding table to destination address
+* Withdraw: 
+    * add mesage to our withdrawal cache
+    * update the forwarding table (disaggregate if needed)
+    * forward the withdraw
 
 To find the best match in our forwarding table for sending data messages, we used bitwise logic to ensure an entry was actually valid for a given destination ip. Since there can be multiple valid entries, we used the logic described in the project description to break ties. For aggregation, we go through each entry in our forwarding table and calculate what the neighboring entry would be using the network and netmask, and then see if that calculated entry exists in our forwarding table (and also that it has all of the same corresponding info like netmask, ASPath, and such). If we do have a match, then we know the lower address of the two entries will be the address of our new aggregated entry, and then we correspondingly update the netmask by shifting it left one. We then remove the two entries which can be aggregated from our forwarding table, and add our new aggregated entry to the forwarding table.
 
