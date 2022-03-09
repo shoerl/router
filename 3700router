@@ -111,7 +111,6 @@ class Router:
         self.asn = asn
         for relationship in connections:
             port, neighbor, relation = relationship.split("-")
-
             self.sockets[neighbor] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sockets[neighbor].bind(('localhost', 0))
             self.ports[neighbor] = int(port)
@@ -244,9 +243,11 @@ class Router:
 
     def find_best_match(self, dst_if):
         """
-        Given destination ip, find best entry in our route cache table.
+        Given destination ip, find best entry in our route cache table, and return peer address of that match
         Args:
             dst_if: str IP
+        Returns:
+            string: peer address of best match in forwarding table, or empty string if there is none
         """
         best_entry_so_far = {}
         for entry in self.forwarding_table:
@@ -273,6 +274,13 @@ class Router:
 
 
     def send_data_message(self, deserialized_data_msg, srcif):
+        """
+        Given deserialized data message and src ip, send data message to best match, 
+        or no route message if there is no best match or if forwarding this message isn't advantageous to us
+        Args:
+            deserialized_data_msg: dictionary representing deserialized data message that we recieved in our router
+            srcif: string representing source network we recieved data message from
+        """
         ip_to_send_to = self.find_best_match(deserialized_data_msg['dst'])
         # Is our src or destination a customer?
         src_or_dest_customer = self.relations[srcif] == "cust" or self.relations[ip_to_send_to] == "cust"
@@ -296,6 +304,10 @@ class Router:
 
 
     def rebuild_forwarding_table_from_scratch(self):
+        """
+        Clear our forwarding table, add all of our entries back from update cache, 
+        remove all entries from withdrawal cache, aggregate as many times as needed
+        """
         self.forwarding_table.clear()
         for entry in self.update_cache:
             self.add_to_forwarding_table(entry['src'], entry['msg'])
@@ -306,7 +318,12 @@ class Router:
 
 
     def remove_from_forwarding_table(self, srcif, networks):
-        """ """
+        """
+        Remove the entries in our forwarding table that correspond with the networks in networks array and source of withdrawal message
+        Args:
+            srcif: str network address representing address that sent withdrawal message
+            networks: list of networks that we want to remove from forwarding table
+        """
         rebuild_and_retry = False
         for network_entry in networks:
             before_len = len(self.forwarding_table)
@@ -328,8 +345,6 @@ class Router:
         """
         return flip_last_one(netmask, network)
 
-    # Input: N/A (except self)
-    # Output: Pair of entries we can aggregate, empty array if there are no entries to aggregate
     def get_entry_pair_to_aggregate(self):
         """
         Produces the entry pair to aggregate in the forwarding table.
@@ -350,9 +365,11 @@ class Router:
                     return [entry, entry2]
         return []
 
-    # Helper function for handling rebuilding table, keep aggregating until aggregating
-    # produces table of same size
     def loop_aggregation(self):
+        """
+        Helper function for handling rebuilding table, keep aggregating until aggregating
+        produces table of same size
+        """
         old_len = len(self.forwarding_table)
         self.aggregate()
         if len(self.forwarding_table) != old_len:
