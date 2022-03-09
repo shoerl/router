@@ -349,7 +349,7 @@ class Router:
         """
         Produces the entry pair to aggregate in the forwarding table.
         Returns:
-            list of two entries, or empty list if no entries to aggregate
+            tuple of two entries which can be aggregated, or empty tuple if no entries to aggregate
         """
         for entry in self.forwarding_table:
             neighbor_ntwk = self.get_neighboring_entry(entry['network'], entry['netmask'])
@@ -362,8 +362,8 @@ class Router:
                     continue
                 # if comparing entries with same netmask and network neighbors
                 if neighbor_ntwk == entry2['network'] and entry['netmask'] == entry2['netmask']:
-                    return [entry, entry2]
-        return []
+                    return (entry, entry2)
+        return ()
 
     def loop_aggregation(self):
         """
