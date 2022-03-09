@@ -95,6 +95,9 @@ def dict_all_properties_same(entry1, entry2, keys):
 
 
 class Router:
+    """
+    Class representing a BGP Router.
+    """
     relations = {}
     sockets = {}
     ports = {}
@@ -103,6 +106,7 @@ class Router:
     withdrawal_cache = []
 
     def __init__(self, asn, connections):
+        # print startup message
         print("Router at AS %s starting up" % asn)
         self.asn = asn
         for relationship in connections:
@@ -115,11 +119,24 @@ class Router:
             self.send(neighbor, json.dumps({ "type": "handshake", "src": self.our_addr(neighbor), "dst": neighbor, "msg": {}  }))
 
     def our_addr(self, dst):
+        """
+        Produces this router's address from the given network.
+        Args:
+            dst : str of the network
+        Returns: 
+            network str
+        """
         quads = list(int(qdn) for qdn in dst.split('.'))
         quads[3] = 1
         return "%d.%d.%d.%d" % (quads[0], quads[1], quads[2], quads[3])
 
     def send(self, network, message):
+        """
+        Sends the given message to the given network, using sockets.
+        Args:
+            network: str network address
+            message: str message data to send
+        """
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
 
     def send_update_messages(self, srcif, deserialized_update_msg):
@@ -129,7 +146,6 @@ class Router:
             srcif - string representing network which we recieved update message from
             deserialized_update_msg - dictionary representing inner msg in update message we recieved
         """
-
         # if true, we must have gotten from peer or provider, so only send updates to customers
         only_customers = self.relations[srcif] != 'cust'
         update_msg = {'msg': {}, 'type': 'update'}
@@ -137,6 +153,7 @@ class Router:
         update_msg['msg']['ASPath'] = [self.asn] + deserialized_update_msg['ASPath']
         update_msg['msg']['network'] = deserialized_update_msg['network']
         for network in self.sockets.keys():
+            # if network is source of message or only sending updates to customers and this network is not a customer
             if network == srcif or (only_customers and self.relations[network] != 'cust'):
                 continue
             update_msg['src'] = self.our_addr(network)
@@ -150,11 +167,11 @@ class Router:
             srcif - string representing network which we recieved withdrawal message from
             deserialized_update_msg - dictionary representing inner msg in withdrawal message we recieved
         """
-
         # if true, we must have gotten from peer or provider, so only send updates to customers
         only_customers = self.relations[srcif] != 'cust'
         deserialized_withdraw_msg = {'msg': deserialized_withdraw_msg, 'type': 'withdraw'}
         for network in self.sockets.keys():
+            # if network is source of message or only sending updates to customers and this network is not a customer
             if network == srcif or (only_customers and self.relations[network] != 'cust'):
                 continue
             deserialized_withdraw_msg['src'] = self.our_addr(network)
@@ -162,15 +179,29 @@ class Router:
             self.send(network, json.dumps(deserialized_withdraw_msg))
 
 
-    # full deserialized update msg being the full msg (with src, dest, etc..)
     def add_to_update_cache(self, full_deserialized_update_msg):
+        """ 
+        Adds the given message to the update cache.
+        Args: 
+            full_deserialized_update_msg: dict full deserialized message with src, dest, etc
+        """
         self.update_cache.append(full_deserialized_update_msg)
 
     def add_to_withdrawal_cache(self, full_deserialized_withdraw_msg):
+        """
+        Adds the given message to the withdrawal cache.
+        Args: 
+            full_deserialized_update_msg: dict full deserialized message with src, dest, etc
+        """
         self.withdrawal_cache.append(full_deserialized_withdraw_msg)
 
-    # deserialized update msg here being the inner update msg
     def add_to_forwarding_table(self, next_hop, deserialized_update_msg):
+        """
+        Adds the given message to the forwarding table with its peer key being the given next_hop.
+        Args: 
+            deserialized_update_msg: dict deserialized message with inner update message
+            next_hop: str network next hop
+        """
         deserialized_update_msg['peer'] = next_hop
         self.forwarding_table.append(deserialized_update_msg)
 
@@ -184,7 +215,6 @@ class Router:
         Returns:
             dictionary - representing the best forwarding table entry
         """
-
         if not entry1:
             return entry2
         # Netmask count here represents the number of 1's in the binary representation
@@ -212,8 +242,12 @@ class Router:
         else:
             return entry1
 
-    # Given destination ip, find best entry in our route cache table
     def find_best_match(self, dst_if):
+        """
+        Given destination ip, find best entry in our route cache table.
+        Args:
+            dst_if: str IP
+        """
         best_entry_so_far = {}
         for entry in self.forwarding_table:
             msk_int = split_by_period_and_get_int_array(entry['netmask'])
@@ -272,9 +306,11 @@ class Router:
 
 
     def remove_from_forwarding_table(self, srcif, networks):
+        """ """
         rebuild_and_retry = False
         for network_entry in networks:
             before_len = len(self.forwarding_table)
+            # forwarding table is all of the entries that do not share the network_entry information
             self.forwarding_table = list(filter(lambda entry: (not (dict_all_properties_same(entry, network_entry, ['network', 'netmask']) and entry['peer'] == srcif)), self.forwarding_table))
             if before_len == len(self.forwarding_table):
                 # We are going to have to rebuild everything, so break out of this loop/function after we are done
@@ -284,18 +320,32 @@ class Router:
                 break
 
     def get_neighboring_entry(self, network, netmask):
+        """
+        Produces the neighboring forwarding table entry next to the given network/netmask pair.
+        Args:
+            network: str network address
+            netmask: str bit netmask
+        """
         return flip_last_one(netmask, network)
 
     # Input: N/A (except self)
     # Output: Pair of entries we can aggregate, empty array if there are no entries to aggregate
     def get_entry_pair_to_aggregate(self):
+        """
+        Produces the entry pair to aggregate in the forwarding table.
+        Returns:
+            list of two entries, or empty list if no entries to aggregate
+        """
         for entry in self.forwarding_table:
             neighbor_ntwk = self.get_neighboring_entry(entry['network'], entry['netmask'])
             for entry2 in self.forwarding_table:
+                # if comparing the same entry, skip
                 if entry == entry2:
                     continue
+                # if comparing entries with different localpref, ASPath, origin, selfOrigin, or peer
                 if not dict_all_properties_same(entry, entry2, ['localpref', 'ASPath', 'origin', 'selfOrigin', 'peer']):
                     continue
+                # if comparing entries with same netmask and network neighbors
                 if neighbor_ntwk == entry2['network'] and entry['netmask'] == entry2['netmask']:
                     return [entry, entry2]
         return []
@@ -309,7 +359,11 @@ class Router:
             self.loop_aggregation()
 
     def aggregate(self):
+        """
+        Aggregates the necessary forwarding table entries.
+        """
         entries = self.get_entry_pair_to_aggregate()
+        # if no entries to aggregate, don't
         if not entries:
             return
 
@@ -327,6 +381,9 @@ class Router:
 
 
     def run(self):
+        """
+        Runs the router logic.
+        """
         while True:
             socks = select.select(self.sockets.values(), [], [], 0.1)[0]
             for conn in socks:
@@ -355,11 +412,10 @@ class Router:
                     self.remove_from_forwarding_table(srcif, msg_json['msg'])
                     self.send_withdraw_message(srcif, msg_json['msg'])
 
-                
-
-        return
-
 if __name__ == "__main__":
+    """
+    Main entrypoint of the 3700router program.
+    """
     parser = argparse.ArgumentParser(description='route packets')
     parser.add_argument('asn', type=int, help="AS number of this router")
     parser.add_argument('connections', metavar='connections', type=str, nargs='+', help="connections")
